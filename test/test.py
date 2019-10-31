@@ -7,27 +7,16 @@ starttime = datetime.datetime.now()
 
 
 
-a = np.array([[0.123,0.887],[0.8,0.21111111111111]])
+a = np.array([[0.123,0.887],[0.8,0.2]])
 
-print(np.repeat(a,4).reshape(-1,8))
+x = np.where(a[:,0] < a[:,1],2,-1)
 
-# tmp = np.vstack((a,b))
-# np.random.shuffle(tmp)
-# print(tmp)
+print(x)
+
+b = np.array([1,1,1,1,1,1])
+print(b)
 
 
-
-# i = np.array([11,22,11,44])
-# # print(np.random.choice(a,size=2))
-# # tmp = np.hstack((i,a))
-# # print(tmp)
-# a11 = a[np.where(i==44)]
-#
-# print(a11)
-# print("++++++++++a+++++++++++++++++")
-# print(a)
-# a[a[:,0] == 1,0] = 100
-#
-# print("--------------a-------------")
-#
-# print(a)
+aa = ""
+aa += "aaaaaaa" + "fffff"
+print(aa)
