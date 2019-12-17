@@ -1,22 +1,4 @@
-import datetime
-import numpy as np
-
-starttime = datetime.datetime.now()
-
-#当中是你的程序
-
-
-
-a = np.array([[0.123,0.887],[0.8,0.2]])
-
-x = np.where(a[:,0] < a[:,1],2,-1)
-
-print(x)
-
-b = np.array([1,1,1,1,1,1])
-print(b)
-
-
-aa = ""
-aa += "aaaaaaa" + "fffff"
-print(aa)
+a = ['a', 'a', 'b', 'c', 'a', 'f', 'd', 'c', 'e', 'e', 'a']
+dic = {'a': 1, 'e': 2, 'd': 4}
+selected = [x for x in a if x in dic.keys()] # 找到a中属于[1,5)中的元素
+print(selected)

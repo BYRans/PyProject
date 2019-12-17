@@ -2,8 +2,10 @@ import malware_classification.global_var as GLVAR
 import numpy as np
 import json
 from sklearn.model_selection import train_test_split
-import math
+import copy
 import re
+import math
+from tmp.InformationGain import InformationGain
 
 
 def generate_ngrams(s, n):
@@ -44,6 +46,23 @@ def create_n_gramed_data(raw_api_filename, no_repet_n_gramed_data_filename, n):
             g.write(api)
         g.close()
 
+
+def create_n_gramed_data_with_repeat(raw_api_filename, with_repet_n_gramed_data_filename, n):
+    print("running create_n_gramed_data.....")
+    apis = []
+    i=0
+    with open(raw_api_filename) as raw_data:
+        for line in raw_data:
+            line_n_gram = generate_ngrams(line, n)
+            line_with_repet_n_gram = " ".join(line_n_gram)
+            apis.append(line_with_repet_n_gram)
+            i += 1
+            if i%500==0:
+                print(i)
+    with open(with_repet_n_gramed_data_filename, 'w')as g:
+        for api in apis:
+            g.write(api)
+        g.close()
 
 def remove_repet(_list, width):
     n = len(_list)
@@ -97,7 +116,7 @@ def remove_repet_of_raw_data(raw_api_filename, no_repet_data_filename, long_widt
         g.close()
 
 
-def create_oprations_set(raw_filename, op_index_filename):
+def create_n_gram_oprations_set(raw_filename, n_grams_with_repeat_index_filename):
     print("running create_oprations_set ...")
     with open(raw_filename) as raw_data:
         operations = set()
@@ -109,11 +128,11 @@ def create_oprations_set(raw_filename, op_index_filename):
     map_index = range(len(operations))
     ziped_op_index = zip(operations_list, map_index)
 
-    operations_dic = {k: v + 1 for k, v in ziped_op_index}  # V+1 for no operation index is 0
+    operations_dic = {k: v  for k, v in ziped_op_index}
 
-    with open(op_index_filename, 'w') as json_file:
+    with open(n_grams_with_repeat_index_filename, 'w') as json_file:
         json.dump(operations_dic, json_file, ensure_ascii=False)
-    print("operations index dictionary create success! Dic file saved in ", op_index_filename)
+    print("operations index dictionary create success! Dic file saved in ", n_grams_with_repeat_index_filename)
     print("the operations's count is:", len(operations))
 
 
@@ -149,33 +168,99 @@ def load_npz_data(file_path):
     return (x_train, y_train), (x_test, y_test)
 
 
-def process_raw_data_4_attention(raw_api_filename, raw_lable_filename, op_index_filename,
+def calc_infomation_gain_creat_grams_set(n_gram_data_with_repeat_filename,n_grams_with_repeat_index_filename,n_grams_index_filename):
+    print("running calc_infomation_gain ...")
+    np.set_printoptions(threshold=np.inf)
+
+    with open(n_grams_with_repeat_index_filename, 'r') as fileR:
+        operation_dic = json.load(fileR)
+        fileR.close()
+
+    with open(n_gram_data_with_repeat_filename) as raw_data:
+        line_num = len(raw_data.readlines())
+
+    with open(n_gram_data_with_repeat_filename) as raw_data:
+        length = len(operation_dic)
+        print("the total operations's ocunt is:", len(operation_dic))
+        processed_data_np = np.empty(shape=(line_num, length)).astype("int32")
+        labels_list = []
+        for i, line in enumerate(raw_data):
+            tmp_processed_data = [0 for x in range(0, length)]
+            operation = line.replace('\n', '').split(' ')
+            operation_set = set(operation)
+            for op in operation_set:
+                if len(op) != 0:
+                    index = operation_dic[op]
+                    tmp_processed_data[index] = 1
+            processed_data_np[i] = np.array(tmp_processed_data)
+
+        labels_index_np = raw_labels_to_index(GLVAR.RAW_LABLE_FILENAME,GLVAR.LABLE_INDEX_FINAME)
+
+        x = processed_data_np
+        y = labels_index_np
+
+        ig = InformationGain(x, y)
+        info_gain = ig.get_result()
+        desc_deepcopy_info_gain = copy.deepcopy(info_gain)
+        desc_deepcopy_info_gain.sort(reverse = True)
+
+        new_reverse_dic = {v:k for k,v in operation_dic.items()}
+        filter_threshold = 0
+        if GLVAR.TH_TYPE == 'INFO_GAIN_TH': # 'INFO_GAIN_TH'  or 'SELECT_GRAMS_COUNT'
+            print("Threshold use 'INFO_GAIN_TH' , the information gain threshold is:",GLVAR.INFO_GAIN_TH)
+            filter_threshold = GLVAR.INFO_GAIN_TH
+        else:
+            filter_threshold = desc_deepcopy_info_gain[GLVAR.SELECT_GRAMS_COUNT - 1]
+            print("Threshold use 'SELECT_GRAMS_COUNT' , the information gain threshold is:",filter_threshold)
+
+        n_gram_set = set()
+        i=0
+        for ga in info_gain:
+            if ga >= filter_threshold:
+                n_gram_set.add(new_reverse_dic[i])
+            i += 1
+        n_grams_list = list(n_gram_set)
+        map_index = range(len(n_grams_list))
+        ziped_grams_index = zip(n_grams_list,map_index)
+        n_grams_dic = {k: v + 1 for k, v in ziped_grams_index}  # V+1 for no operation index is 0
+
+        with open(n_grams_index_filename, 'w') as json_file:
+            json.dump(n_grams_dic, json_file, ensure_ascii=False)
+        print("filtered n grams index dictionary create success! Dic file saved in: ", GLVAR.N_GRAMS_INDEX_FILENAME)
+        print("the grams's count is:", len(n_grams_list))
+
+
+def process_n_grams_data_4_attention(n_gram_filename, raw_lable_filename, filtered_n_gram_index_filename,
                                  attention_train_data):
     print("running process_raw_data_4_attention ...")
     np.set_printoptions(threshold=np.inf)
 
-    with open(op_index_filename, 'r') as fileR:
+    with open(filtered_n_gram_index_filename, 'r') as fileR:
         operation_dic = json.load(fileR)
         fileR.close()
         print("the total operations count is:", len(operation_dic))
 
-    with open(raw_api_filename) as raw_data:
+    with open(n_gram_filename) as raw_data:
         line_num = len(raw_data.readlines())
         print("raw data total data count is:", line_num)
 
-    with open(raw_api_filename) as raw_data:
+    with open(n_gram_filename) as raw_data:
         longest_operation_size = 0
+        tmp_i = 0
         for i, line in enumerate(raw_data):
             operation = str(line).split(' ')
-            tmp_len = len(operation)
+            selected_operation = [op for op in operation if op in operation_dic.keys()]
+            tmp_len = len(selected_operation)
             if tmp_len > longest_operation_size:
                 longest_operation_size = tmp_len
+                tmp_i = i
         print("longest data RAW operation length is:", longest_operation_size)
+        print("longest data index is:",tmp_i)
         longest_operation_size = pow(math.ceil(math.sqrt(longest_operation_size)), 2)
         print("longest data operation length is:", longest_operation_size)
         print("picture size is: ", math.sqrt(longest_operation_size), " * ",
               math.sqrt(longest_operation_size))
-    with open(raw_api_filename) as raw_data:
+    with open(n_gram_filename) as raw_data:
         print("the total operations's ocunt is:", len(operation_dic),
               "\n the longest operation length is",
               longest_operation_size)
@@ -198,127 +283,25 @@ def process_raw_data_4_attention(raw_api_filename, raw_lable_filename, op_index_
 
         x_train, x_test, y_train, y_test = train_test_split(processed_data_np, labels_index_np,
                                                             test_size=0.2,
-                                                             random_state=0)
+                                                            random_state=0)
 
         np.savez(attention_train_data, x_train=x_train, x_test=x_test, y_train=y_train,
                  y_test=y_test)
 
-def raw_labels_to_binary_index_with_focus_label(raw_lable_filename, focus_label):  # 0:False  1:True
-    raw_lables_list = []
-
-    with open(raw_lable_filename) as raw_data:
-        for line in raw_data:
-            raw_lables_list.append(line.replace('\n', '').strip())
-
-    lables_index_np = np.zeros(len(raw_lables_list))
-    for i, lable in enumerate(raw_lables_list):
-        if lable.strip() == focus_label:
-            lables_index_np[i] = 1
-
-    return lables_index_np
-
-
-def process_raw_data_4_multy_binary_balance(raw_api_filename, raw_lable_filename,
-                                            op_index_filename,
-                                            multy_binary_train_and_test_data_dir,
-                                            lables_index_filename):
-    print("running process_raw_data_4_attention ...")
-    np.set_printoptions(threshold=np.inf)
-
-    with open(op_index_filename, 'r') as fileR:
-        operation_dic = json.load(fileR)
-        fileR.close()
-        print("the total operations count is:", len(operation_dic))
-
-    with open(raw_api_filename) as raw_data:
-        line_num = len(raw_data.readlines())
-        print("raw data total data count is:", line_num)
-
-    with open(raw_api_filename) as raw_data:
-        longest_operation_size = 0
-        for i, line in enumerate(raw_data):
-            operation = str(line).split(' ')
-            tmp_len = len(operation)
-            if tmp_len > longest_operation_size:
-                longest_operation_size = tmp_len
-                if tmp_len == 12179:
-                    print(line)
-                    print(i)
-        print("longest data RAW operation length is:", longest_operation_size)
-        longest_operation_size = pow(math.ceil(math.sqrt(longest_operation_size)), 2)
-        print("longest data operation length is:", longest_operation_size)
-        print("picture size is: ", math.sqrt(longest_operation_size), " * ",
-              math.sqrt(longest_operation_size))
-    with open(raw_api_filename) as raw_data:
-        print("the total operations's ocunt is:", len(operation_dic),
-              "\n the longest operation length is",
-              longest_operation_size)
-        processed_data_np = np.empty(shape=(line_num, longest_operation_size)).astype("int32")
-        count = 0
-        for i, line in enumerate(raw_data):
-            count += 1
-            if count % 1000 == 0:
-                print(count)
-            tmp_processed_data = [0 for x in range(0, longest_operation_size)]
-            operation = line.replace('\n', '').split(' ')
-            j = 0
-            for op in operation:
-                if len(op) != 0:
-                    index = operation_dic[op]
-                    tmp_processed_data[j] = index
-                    j += 1
-            processed_data_np[i] = np.array(tmp_processed_data)
-
-        labels_index_np = raw_labels_to_index(raw_lable_filename, lables_index_filename)
-
-        x_train, x_test, y_train, y_test = train_test_split(processed_data_np,
-                                                            labels_index_np,
-                                                            test_size=0.2,
-                                                            random_state=0)
-        np.savez(GLVAR.TRAIN_AND_TEST_DATA, x_train=x_train, x_test=x_test, y_train=y_train,
-                 y_test=y_test)
-
-        label_list = {"Trojan", "Backdoor", "Downloader", "Worms", "Spyware", "Adware", "Dropper",
-                      "Virus"}
-        for focus_label in label_list:
-            labels_index_np = raw_labels_to_binary_index_with_focus_label(raw_lable_filename,
-                                                                          focus_label)
-            data_foucus = processed_data_np[np.where(labels_index_np == 1)]
-            data_unfoucus = processed_data_np[np.where(labels_index_np != 1)]
-
-            np.random.shuffle(data_unfoucus)
-
-            data_unfoucus = data_unfoucus[
-                            0:int(np.ceil(len(data_foucus) * GLVAR.FOUCUS_UNFOUCUS_PROPORTION))]
-
-            processed_data_np_foucus = np.vstack((data_foucus, data_unfoucus))
-
-            labels_index_np_foucus = np.zeros(len(processed_data_np_foucus))
-            labels_index_np_foucus[0:len(data_foucus)] = 1
-
-            x_train, x_test, y_train, y_test = train_test_split(processed_data_np_foucus,
-                                                                labels_index_np_foucus,
-                                                                test_size=0.2,
-                                                                random_state=0)
-            npz_filename = multy_binary_train_and_test_data_dir + focus_label + ".npz"
-            np.savez(npz_filename, x_train=x_train, x_test=x_test, y_train=y_train, y_test=y_test)
-            # print(y_test)
-
 def main():
 
-    # n=2
-    #
-    # create_n_gramed_data(GLVAR.RAW_API_FILENAME, GLVAR.N_GRAM_DATA_NO_REPEAT_FINAME, n)
-    #
-    # create_oprations_set(GLVAR.N_GRAM_DATA_NO_REPEAT_FINAME, GLVAR.OP_INDEX_FILENAME)
+    n=2
 
-    # process_raw_data_4_attention(GLVAR.N_GRAM_DATA_NO_REPEAT_FINAME, GLVAR.RAW_LABLE_FILENAME, GLVAR.OP_INDEX_FILENAME,
-    #                              GLVAR.TRAIN_AND_TEST_DATA)
 
-    process_raw_data_4_multy_binary_balance(GLVAR.N_GRAM_DATA_NO_REPEAT_FINAME,
-                                              GLVAR.RAW_LABLE_FILENAME,
-                                              GLVAR.OP_INDEX_FILENAME,
-                                              GLVAR.MULTY_BINARY_TRAIN_AND_TEST_DATA_DIR,GLVAR.LABLE_INDEX_FINAME)
+    # create_n_gramed_data_with_repeat(GLVAR.RAW_API_FILENAME, GLVAR.N_GRAM_DATA_WITH_REPEAT_FINAME, n)
+    #
+    #
+    # create_n_gram_oprations_set(GLVAR.N_GRAM_DATA_WITH_REPEAT_FINAME,GLVAR.N_GRAMS_WITH_REPEAT_INDEX_FILENAME,)
+
+    calc_infomation_gain_creat_grams_set(GLVAR.N_GRAM_DATA_WITH_REPEAT_FINAME, GLVAR.N_GRAMS_WITH_REPEAT_INDEX_FILENAME,GLVAR.N_GRAMS_INDEX_FILENAME)
+
+    process_n_grams_data_4_attention(GLVAR.N_GRAM_DATA_WITH_REPEAT_FINAME, GLVAR.RAW_LABLE_FILENAME, GLVAR.N_GRAMS_INDEX_FILENAME,
+                                 GLVAR.TRAIN_AND_TEST_DATA)
 
 if __name__ == "__main__":
     main()
